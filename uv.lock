@@ -949,7 +949,7 @@ requires-dist = [
     { name = "smplx", specifier = "==0.1.28" },
     { name = "timm", specifier = ">=0.9.0" },
     { name = "torch", specifier = "==2.9.0" },
-    { name = "torch-tensorrt" },
+    { name = "torch-tensorrt", specifier = "==2.9.0" },
     { name = "torchvision", specifier = "==0.24.1" },
     { name = "trimesh", specifier = ">=4.0.0" },
     { name = "yacs", specifier = ">=0.1.8" },

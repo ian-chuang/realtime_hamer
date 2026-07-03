@@ -12,7 +12,7 @@ dependencies = [
     # Core ML stack (CUDA 12.8 / RTX 5090)
     "torch==2.9.0",
     "torchvision==0.24.1",
-    "torch-tensorrt",
+    "torch-tensorrt==2.9.0",
     "onnxruntime-gpu>=1.22.0",
     "rtmlib>=0.0.15",
     "einops>=0.8.0",
