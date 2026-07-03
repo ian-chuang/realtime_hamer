@@ -5,42 +5,34 @@ build-backend = "uv_build"
 [project]
 name = "realtime-hamer"
 version = "0.1.0"
-description = "Realtime HaMeR hand reconstruction (RTMPose + TensorRT + PyTorch3D)"
+description = "Realtime HaMeR hand reconstruction (RTMPose + TensorRT + viser)"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    # Core ML stack (CUDA 12.8 / RTX 5090)
     "torch==2.9.0",
     "torchvision==0.24.1",
     "torch-tensorrt==2.9.0",
-    "onnxruntime-gpu>=1.22.0",
+    # CUDA-12 ORT build (1.23+ on PyPI targets CUDA 13)
+    "onnxruntime-gpu==1.22.0",
     "rtmlib>=0.0.15",
     "einops>=0.8.0",
     "numpy>=1.26.0",
     "opencv-python>=4.8.0",
     "pytorch-lightning>=2.0.0",
-    "scikit-image>=0.22.0",
     "smplx==0.1.28",
     "timm>=0.9.0",
     "yacs>=0.1.8",
     "omegaconf>=2.3.0",
-    "pytorch3d==0.7.9+pt2.9.0cu128",
-    "trimesh>=4.0.0",
-    "pyrender>=0.1.45",
     "chumpy",
+    "viser>=1.0.16",
+    "tyro>=0.9.17",
 ]
 
 [tool.uv]
 override-dependencies = [
-    "torch==2.9.0", # for rtx 5090
-    "torchvision==0.24.1", # for rtx 5090
+    "torch==2.9.0",
+    "torchvision==0.24.1",
 ]
 
-[[tool.uv.index]]
-name = "torch-packages-builder"
-url = "https://miropsota.github.io/torch_packages_builder"
-explicit = true
-
 [tool.uv.sources]
-pytorch3d = { index = "torch-packages-builder" }
 chumpy = { git = "https://github.com/mattloper/chumpy" }

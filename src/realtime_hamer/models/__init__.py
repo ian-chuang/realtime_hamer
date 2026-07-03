@@ -50,7 +50,7 @@ def load_hamer(checkpoint_path=DEFAULT_CHECKPOINT, init_renderer: bool = False):
         model_cfg.MODEL.BACKBONE.pop('PRETRAINED_WEIGHTS')
         model_cfg.freeze()
 
-    # Skip pyrender-based training visualizers; demos use PyTorch3D.
+    # Skip training-only pyrender visualizers for inference.
     # weights_only=False: HaMeR ckpts embed omegaconf objects (trusted local assets).
     model = HAMER.load_from_checkpoint(
         checkpoint_path,

@@ -219,5 +219,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Demo outputs
+# Demo outputs / compiled engines
 output/
+assets/trt_cache/

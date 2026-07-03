@@ -4,7 +4,6 @@ from typing import Any, Dict, Mapping, Tuple
 
 from yacs.config import CfgNode
 
-from ..utils import SkeletonRenderer, MeshRenderer
 from ..utils.geometry import aa_to_rotmat, perspective_projection
 from ..utils.pylogger import get_pylogger
 from .backbones import create_backbone
@@ -53,8 +52,11 @@ class HAMER(pl.LightningModule):
 
         # Buffer that shows whetheer we need to initialize ActNorm layers
         self.register_buffer('initialized', torch.tensor(False))
-        # Setup renderer for visualization
+        # Setup renderer for visualization (training only; pulls pyrender).
         if init_renderer:
+            from ..utils.mesh_renderer import MeshRenderer
+            from ..utils.skeleton_renderer import SkeletonRenderer
+
             self.renderer = SkeletonRenderer(self.cfg)
             self.mesh_renderer = MeshRenderer(self.cfg, faces=self.mano.faces)
         else:
