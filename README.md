@@ -8,33 +8,6 @@ Fast 3D hand mesh reconstruction from video or webcam:
 
 Based on [hamer-demo](https://github.com/ATAboukhadra/hamer-demo) and [HaMeR](https://github.com/geopavlakos/hamer).
 
----
-
-## 1. Install CUDA Toolkit 12.9.1
-
-Download and install from:
-
-https://developer.nvidia.com/cuda-12-9-1-download-archive?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=22.04&target_type=deb_network
-
----
-
-## 2. Install TensorRT Tools (optional, for `trtexec` / ONNX engines)
-
-System TensorRT 11 is separate from the TensorRT 10 Python bindings used by `torch-tensorrt`:
-
-```bash
-sudo apt install -y \
-  libnvinfer-bin=11.0.0.114-1+cuda12.9 \
-  libnvinfer11=11.0.0.114-1+cuda12.9 \
-  libnvinfer-plugin11=11.0.0.114-1+cuda12.9 \
-  libnvinfer-lean11=11.0.0.114-1+cuda12.9 \
-  libnvinfer-dispatch11=11.0.0.114-1+cuda12.9 \
-  libnvonnxparsers11=11.0.0.114-1+cuda12.9 \
-  libnvinfer-vc-plugin11=11.0.0.114-1+cuda12.9
-```
-
----
-
 ## 3. Install UV
 
 ```bash

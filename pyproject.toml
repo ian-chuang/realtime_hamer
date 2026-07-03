@@ -12,17 +12,9 @@ dependencies = [
     # Core ML stack (CUDA 12.8 / RTX 5090)
     "torch==2.9.0",
     "torchvision==0.24.1",
-    # torch-tensorrt 2.9 needs TensorRT 10 Python bindings (tensorrt-cu13).
-    # Do not also pin tensorrt-cu12/11.x — those override the API it needs.
-    # System TensorRT 11 (trtexec) can still be used separately for ONNX engines.
-    "torch-tensorrt==2.9.0",
-    "tensorrt==10.13.3.9.post1",
-    "tensorrt-cu13==10.13.3.9.post1",
-    # Hand detection (RTMPose via onnxruntime-gpu).
-    # Pin to CUDA-12 builds; 1.23+ on PyPI targets CUDA 13.
-    "onnxruntime-gpu==1.22.0",
+    "torch-tensorrt",
+    "onnxruntime-gpu>=1.22.0",
     "rtmlib>=0.0.15",
-    # HaMeR inference deps (from geopavlakos/hamer, minus detectron2/mmcv)
     "einops>=0.8.0",
     "numpy>=1.26.0",
     "opencv-python>=4.8.0",
@@ -32,7 +24,6 @@ dependencies = [
     "timm>=0.9.0",
     "yacs>=0.1.8",
     "omegaconf>=2.3.0",
-    # Rendering
     "pytorch3d==0.7.9+pt2.9.0cu128",
     "trimesh>=4.0.0",
     "pyrender>=0.1.45",
