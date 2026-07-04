@@ -11,9 +11,8 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "torch==2.9.0",
     "torchvision==0.24.1",
-    "torch-tensorrt==2.9.0",
-    # Keep below 1.25 so we stay on CUDA-12 ORT builds (1.27+ wants CUDA 13).
-    "onnxruntime-gpu>=1.22.0,<1.25",
+    # Match fast_foundation_stereo; CUDA-12 build (import torch first for CUDA EP).
+    "onnxruntime-gpu==1.22.0",
     "rtmlib>=0.0.15",
     "einops>=0.8.0",
     "numpy>=1.26.0",
@@ -32,6 +31,7 @@ dependencies = [
 override-dependencies = [
     "torch==2.9.0",
     "torchvision==0.24.1",
+    "onnxruntime-gpu==1.22.0",
 ]
 
 [tool.uv.sources]

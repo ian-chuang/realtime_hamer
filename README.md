@@ -1,6 +1,6 @@
 # Realtime HaMeR
 
-RTMPose (`onnxruntime-gpu`) → HaMeR (TensorRT) → fixed-root MANO mesh.
+RTMPose hand models (`onnxruntime-gpu`) → HaMeR (PyTorch FP16) → fixed-root MANO mesh.
 
 ## Setup
 
@@ -26,7 +26,7 @@ out = est.estimate(frame_bgr)  # out.vertices at origin, out.overlay_bgr, timing
 
 ```bash
 uv run python -m realtime_hamer.scripts.demo --video assets/data/hand.mp4 --hand right
-uv run python -m realtime_hamer.scripts.demo --camera 0 --hand left
+uv run python -m realtime_hamer.scripts.demo --camera 0 --hand right
 ```
 
-Open http://localhost:8080. First run compiles TensorRT into `assets/trt_cache/`.
+Open http://localhost:8080.
