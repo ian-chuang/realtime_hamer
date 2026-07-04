@@ -1,8 +1,6 @@
 # Realtime HaMeR
 
-RTMPose (`onnxruntime-gpu`) → HaMeR (TensorRT) → [viser](https://viser.studio) 3D view.
-
-Based on [hamer-demo](https://github.com/ATAboukhadra/hamer-demo) and [HaMeR](https://github.com/geopavlakos/hamer).
+RTMPose (`onnxruntime-gpu`) → HaMeR (TensorRT) → fixed-root MANO mesh.
 
 ## Setup
 
@@ -10,25 +8,25 @@ Based on [hamer-demo](https://github.com/ATAboukhadra/hamer-demo) and [HaMeR](ht
 uv sync
 ```
 
-Assets:
+Assets under `assets/`:
 
-1. `MANO_RIGHT.pkl` from https://mano.is.tue.mpg.de → `assets/data/mano/MANO_RIGHT.pkl`
-2. `new_hamer_weights.ckpt` from https://gkarv.github.io/hand-texture-module/ → `assets/hamer_ckpts/checkpoints/new_hamer_weights.ckpt`
+1. `data/mano/MANO_RIGHT.pkl` from https://mano.is.tue.mpg.de
+2. `hamer_ckpts/checkpoints/new_hamer_weights.ckpt` from https://gkarv.github.io/hand-texture-module/
 
-## Run
+## Library usage
 
-```bash
-# looping video
-uv run python -m realtime_hamer.scripts.demo --video assets/data/hand.mp4
+```python
+from realtime_hamer.hand_pose_estimator import HandPoseEstimator
 
-# webcam
-uv run python -m realtime_hamer.scripts.demo --camera 0
+est = HandPoseEstimator(hand="right", assets_dir="assets")
+out = est.estimate(frame_bgr)  # out.vertices at origin, out.overlay_bgr, timings
 ```
 
-Open http://localhost:8080. First run compiles TensorRT into `assets/trt_cache/`; later runs load the cache.
+## Demo
 
-Viser sidebar:
+```bash
+uv run python -m realtime_hamer.scripts.demo --video assets/data/hand.mp4 --hand right
+uv run python -m realtime_hamer.scripts.demo --camera 0 --hand left
+```
 
-- **RTMPose** image: video with hand keypoints / boxes
-- **Fix hand root** (on by default): wrists pinned in front of the camera so you can focus on fingers
-- **Focal** / **Depth scale**: used when fix-root is off, to place hands in camera space (defaults assume a hand ~10–30 cm away)
+Open http://localhost:8080. First run compiles TensorRT into `assets/trt_cache/`.

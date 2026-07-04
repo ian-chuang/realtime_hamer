@@ -1,8 +1,8 @@
-"""Preload GPU shared libraries for torch_tensorrt and onnxruntime-gpu.
+"""Load CUDA / TensorRT shared libraries from the venv before torch_tensorrt.
 
-torch-tensorrt 2.9 ships against CUDA 13 / TensorRT 10 wheels. onnxruntime-gpu
-1.22 uses CUDA 12 libs from the torch/nvidia wheels. Those live inside the
-venv but are not on the default loader path.
+``torch-tensorrt`` and ``onnxruntime-gpu`` both need NVIDIA ``.so`` files that
+ship inside site-packages (via torch / tensorrt wheels). Those directories are not
+on the default dynamic-linker path, so we preload them once at import time.
 """
 
 from __future__ import annotations
@@ -24,12 +24,7 @@ def _nvidia_lib_dirs(site: Path) -> list[Path]:
     nvidia = site / "nvidia"
     if not nvidia.is_dir():
         return []
-    dirs = []
-    for child in nvidia.iterdir():
-        lib_dir = child / "lib"
-        if lib_dir.is_dir():
-            dirs.append(lib_dir)
-    return dirs
+    return [p / "lib" for p in nvidia.iterdir() if (p / "lib").is_dir()]
 
 
 def preload_gpu_libs() -> None:
@@ -48,8 +43,7 @@ def preload_gpu_libs() -> None:
             + ([os.environ["LD_LIBRARY_PATH"]] if os.environ.get("LD_LIBRARY_PATH") else [])
         )
 
-    # Prefer CUDA 13 (torch_tensorrt) then CUDA 12 (onnxruntime-gpu / torch).
-    preload_names = [
+    for name in (
         "libcudart.so.13",
         "libcudart.so.12",
         "libcublasLt.so.12",
@@ -59,8 +53,7 @@ def preload_gpu_libs() -> None:
         "libnvrtc.so.12",
         "libnvinfer.so.10",
         "libnvinfer_plugin.so.10",
-    ]
-    for name in preload_names:
+    ):
         for lib_dir in lib_dirs:
             candidate = lib_dir / name
             if candidate.is_file():

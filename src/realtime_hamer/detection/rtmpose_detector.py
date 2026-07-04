@@ -7,10 +7,13 @@ confident keypoints so a single visible hand does not spawn a ghost pair.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import cv2
 import numpy as np
 from rtmlib import Wholebody
+
+HandSide = Literal["left", "right", "both"]
 
 # COCO-WholeBody hand keypoint indices.
 _NUM_HAND_KPTS = 21
@@ -39,6 +42,7 @@ class HandDet:
 def create_detector(
     mode: str = "lightweight",
     device: str = "cuda",
+    hand: HandSide = "both",
     score_thr: float = 0.5,
     min_kpts: int = 10,
     min_mean_score: float = 0.55,
@@ -49,8 +53,16 @@ def create_detector(
 
     Wholebody always fills L/R slots; ghost hands usually have fewer / weaker
     keypoints than a real hand, so we filter hard and drop a weak second hand.
+    Set ``hand`` to ``"left"`` or ``"right"`` to only consider that slot.
     """
+    if hand not in ("left", "right", "both"):
+        raise ValueError("hand must be 'left', 'right', or 'both'")
     pose_model = Wholebody(mode=mode, backend="onnxruntime", device=device)
+    sides = (
+        ((False, _L_HAND), (True, _R_HAND))
+        if hand == "both"
+        else (((hand == "right"), _R_HAND if hand == "right" else _L_HAND),)
+    )
 
     def _hand_from_kpts(kpts: np.ndarray, scores: np.ndarray, is_right: bool) -> HandDet | None:
         # Wrist must be visible — ghosts often lack a confident wrist.
@@ -91,17 +103,17 @@ def create_detector(
         all_kpts, all_scores = pose_model(frame)
         best: dict[bool, HandDet | None] = {False: None, True: None}
         for kpts, scores in zip(all_kpts, all_scores):
-            for is_right, start in ((False, _L_HAND), (True, _R_HAND)):
-                hand = _hand_from_kpts(
+            for is_right, start in sides:
+                det = _hand_from_kpts(
                     kpts[start : start + _NUM_HAND_KPTS],
                     scores[start : start + _NUM_HAND_KPTS],
                     is_right,
                 )
-                if hand is None:
+                if det is None:
                     continue
                 prev = best[is_right]
-                if prev is None or hand.score > prev.score:
-                    best[is_right] = hand
+                if prev is None or det.score > prev.score:
+                    best[is_right] = det
 
         hands = [h for h in (best[False], best[True]) if h is not None]
         # If one hand is clearly weaker, treat it as a ghost.

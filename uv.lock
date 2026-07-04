@@ -910,7 +910,7 @@ requires-dist = [
     { name = "einops", specifier = ">=0.8.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
-    { name = "onnxruntime-gpu", specifier = "==1.22.0" },
+    { name = "onnxruntime-gpu", specifier = ">=1.22.0,<1.25" },
     { name = "opencv-python", specifier = ">=4.8.0" },
     { name = "pytorch-lightning", specifier = ">=2.0.0" },
     { name = "rtmlib", specifier = ">=0.0.15" },
