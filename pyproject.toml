@@ -13,7 +13,7 @@ dependencies = [
     "torchvision==0.24.1",
     # Same CUDA-12 stack as fast_foundation_stereo
     "onnx>=1.16.0",
-    "onnxruntime-gpu==1.22.0",
+    "onnxruntime-gpu>=1.22.0",
     "tensorrt-cu12==11.0.0.114",
     "tensorrt-dispatch-cu12==11.0.0.114",
     "tensorrt-lean-cu12==11.0.0.114",

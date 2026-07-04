@@ -974,7 +974,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "onnx", specifier = ">=1.16.0" },
-    { name = "onnxruntime-gpu", specifier = "==1.22.0" },
+    { name = "onnxruntime-gpu", specifier = ">=1.22.0" },
     { name = "opencv-python", specifier = ">=4.8.0" },
     { name = "pytorch-lightning", specifier = ">=2.0.0" },
     { name = "pytorch3d", specifier = "==0.7.9+pt2.9.0cu128", index = "https://miropsota.github.io/torch_packages_builder" },
