@@ -219,6 +219,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Demo outputs / compiled engines
+# Demo outputs / compiled engines / ONNX external weights
 output/
 assets/trt_cache/

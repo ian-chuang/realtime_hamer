@@ -5,14 +5,18 @@ build-backend = "uv_build"
 [project]
 name = "realtime-hamer"
 version = "0.1.0"
-description = "Realtime HaMeR hand reconstruction (RTMPose + TensorRT + viser)"
+description = "Realtime HaMeR hand reconstruction (RTMPose + TensorRT)"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "torch==2.9.0",
     "torchvision==0.24.1",
-    # Match fast_foundation_stereo; CUDA-12 build (import torch first for CUDA EP).
+    # Same CUDA-12 stack as fast_foundation_stereo
+    "onnx>=1.16.0",
     "onnxruntime-gpu==1.22.0",
+    "tensorrt-cu12==11.0.0.114",
+    "tensorrt-dispatch-cu12==11.0.0.114",
+    "tensorrt-lean-cu12==11.0.0.114",
     "rtmlib>=0.0.15",
     "einops>=0.8.0",
     "numpy>=1.26.0",
