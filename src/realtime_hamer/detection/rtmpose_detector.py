@@ -84,12 +84,12 @@ def create_detector(
 ):
     """Return ``detector(frame) -> list[HandDet]`` (0 or 1 hand).
 
-    Prefers the user-selected hand slot; falls back to the other if needed.
-    ``HandDet.is_right`` is the *true* RTMPose side (required for correct HaMeR crops).
+    Only the specified hand slot is used (no opposite-hand fallback).
     """
     if hand not in ("left", "right"):
         raise ValueError("hand must be 'left' or 'right'")
-    prefer_right = hand == "right"
+    is_right = hand == "right"
+    start = _R_HAND if is_right else _L_HAND
 
     import torch  # noqa: F401  # load CUDA before TRT
 
@@ -97,68 +97,44 @@ def create_detector(
     if trt_cache is not None:
         _patch_sessions_trt(pose_model, Path(trt_cache))
 
-    prefer_start = _R_HAND if prefer_right else _L_HAND
-    other_start = _L_HAND if prefer_right else _R_HAND
-
-    def _from_slot(kpts, scores, start) -> HandDet | None:
-        is_right = start == _R_HAND
-        hk = kpts[start : start + _NUM_HAND_KPTS]
-        hs = scores[start : start + _NUM_HAND_KPTS]
-        if hs[0] < score_thr:
-            return None
-        valid = hs > score_thr
-        if int(valid.sum()) < min_kpts:
-            return None
-        mean_score = float(hs[valid].mean())
-        if mean_score < min_mean_score:
-            return None
-        pts = hk[valid]
-        x0, y0 = float(pts[:, 0].min()), float(pts[:, 1].min())
-        x1, y1 = float(pts[:, 0].max()), float(pts[:, 1].max())
-        w, h = x1 - x0, y1 - y0
-        if w <= 1 or h <= 1:
-            return None
-        if w > h:
-            d = (w - h) / 2
-            y0, y1 = y0 - d, y1 + d
-        else:
-            d = (h - w) / 2
-            x0, x1 = x0 - d, x1 + d
-        if min(x1 - x0, y1 - y0) < min_box_size:
-            return None
-        return HandDet(
-            box=[x0, y0, x1, y1],
-            is_right=is_right,
-            kpts=hk.astype(np.float32),
-            scores=hs.astype(np.float32),
-            score=mean_score,
-        )
-
     def detector(frame: np.ndarray) -> list[HandDet]:
         all_kpts, all_scores = pose_model(frame)
-        preferred: HandDet | None = None
-        fallback: HandDet | None = None
+        best: HandDet | None = None
         for kpts, scores in zip(all_kpts, all_scores):
-            for start, bucket in ((prefer_start, "pref"), (other_start, "other")):
-                det = _from_slot(kpts, scores, start)
-                if det is None:
-                    continue
-                if bucket == "pref":
-                    if preferred is None or det.score > preferred.score:
-                        preferred = det
-                else:
-                    if fallback is None or det.score > fallback.score:
-                        fallback = det
-        # Prefer selected side; only use the other if preferred is missing and
-        # fallback is clearly strong (avoids ghost opposite-hand slots).
-        if preferred is not None and fallback is not None:
-            # Prefer selected side unless the other is clearly stronger.
-            return [preferred] if preferred.score + 0.05 >= fallback.score else [fallback]
-        if preferred is not None:
-            return [preferred]
-        if fallback is not None:
-            return [fallback]
-        return []
+            hk = kpts[start : start + _NUM_HAND_KPTS]
+            hs = scores[start : start + _NUM_HAND_KPTS]
+            if hs[0] < score_thr:
+                continue
+            valid = hs > score_thr
+            if int(valid.sum()) < min_kpts:
+                continue
+            mean_score = float(hs[valid].mean())
+            if mean_score < min_mean_score:
+                continue
+            pts = hk[valid]
+            x0, y0 = float(pts[:, 0].min()), float(pts[:, 1].min())
+            x1, y1 = float(pts[:, 0].max()), float(pts[:, 1].max())
+            w, h = x1 - x0, y1 - y0
+            if w <= 1 or h <= 1:
+                continue
+            if w > h:
+                d = (w - h) / 2
+                y0, y1 = y0 - d, y1 + d
+            else:
+                d = (h - w) / 2
+                x0, x1 = x0 - d, x1 + d
+            if min(x1 - x0, y1 - y0) < min_box_size:
+                continue
+            det = HandDet(
+                box=[x0, y0, x1, y1],
+                is_right=is_right,
+                kpts=hk.astype(np.float32),
+                scores=hs.astype(np.float32),
+                score=mean_score,
+            )
+            if best is None or det.score > best.score:
+                best = det
+        return [best] if best is not None else []
 
     return detector
 
