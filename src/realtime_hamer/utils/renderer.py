@@ -166,6 +166,8 @@ class Renderer:
         self.camera_center = [self.img_res // 2, self.img_res // 2]
         self.faces = faces
         self.faces_left = self.faces[:,[0,2,1]]
+        self._offscreen = None
+        self._offscreen_res = None
 
     def __call__(self,
                 vertices: np.array,
@@ -331,6 +333,17 @@ class Renderer:
 
         return color
 
+    def _get_offscreen(self, width: int, height: int):
+        res = (int(width), int(height))
+        if self._offscreen is None or self._offscreen_res != res:
+            if self._offscreen is not None:
+                self._offscreen.delete()
+            self._offscreen = pyrender.OffscreenRenderer(
+                viewport_width=res[0], viewport_height=res[1], point_size=1.0
+            )
+            self._offscreen_res = res
+        return self._offscreen
+
     def render_rgba_multiple(
             self,
             vertices: List[np.array],
@@ -344,13 +357,7 @@ class Renderer:
             is_right=None,
         ):
 
-        renderer = pyrender.OffscreenRenderer(viewport_width=render_res[0],
-                                              viewport_height=render_res[1],
-                                              point_size=1.0)
-        # material = pyrender.MetallicRoughnessMaterial(
-        #     metallicFactor=0.0,
-        #     alphaMode='OPAQUE',
-        #     baseColorFactor=(*mesh_base_color, 1.0))
+        renderer = self._get_offscreen(render_res[0], render_res[1])
 
         if is_right is None:
             is_right = [1 for _ in range(len(vertices))]
@@ -363,7 +370,6 @@ class Renderer:
             scene.add(mesh, f'mesh_{i}')
 
         camera_pose = np.eye(4)
-        # camera_pose[:3, 3] = camera_translation
         camera_center = [render_res[0] / 2., render_res[1] / 2.]
         focal_length = focal_length if focal_length is not None else self.focal_length
         camera = pyrender.IntrinsicsCamera(fx=focal_length, fy=focal_length,
@@ -381,7 +387,6 @@ class Renderer:
 
         color, rend_depth = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
         color = color.astype(np.float32) / 255.0
-        renderer.delete()
 
         return color
 

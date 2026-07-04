@@ -353,6 +353,17 @@ wheels = [
 ]
 
 [[package]]
+name = "iopath"
+version = "0.1.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "portalocker" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/73/b3d451dfc523756cf177d3ebb0af76dc7751b341c60e2a21871be400ae29/iopath-0.1.10.tar.gz", hash = "sha256:3311c16a4d9137223e20f141655759933e1eda24f8bff166af834af3c645ef01", size = 42226, upload-time = "2022-07-09T19:00:50.866Z" }
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -800,6 +811,18 @@ wheels = [
 ]
 
 [[package]]
+name = "portalocker"
+version = "3.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5e/77/65b857a69ed876e1951e88aaba60f5ce6120c33703f7cb61a3c894b8c1b6/portalocker-3.2.0.tar.gz", hash = "sha256:1f3002956a54a8c3730586c5c77bf18fae4149e07eaf1c29fc3faf4d5a3f89ac", size = 95644, upload-time = "2025-06-14T13:20:40.03Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4b/a6/38c8e2f318bf67d338f4d629e93b0b4b9af331f455f0390ea8ce4a099b26/portalocker-3.2.0-py3-none-any.whl", hash = "sha256:3cdc5f565312224bc570c49337bd21428bba0ef363bbcf58b9ef4a9f11779968", size = 22424, upload-time = "2025-06-14T13:20:38.083Z" },
+]
+
+[[package]]
 name = "propcache"
 version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
@@ -878,6 +901,28 @@ wheels = [
 ]
 
 [[package]]
+name = "pytorch3d"
+version = "0.7.9+pt2.9.0cu128"
+source = { registry = "https://miropsota.github.io/torch_packages_builder" }
+dependencies = [
+    { name = "iopath" },
+]
+wheels = [
+    { url = "https://github.com/MiroPsota/torch_packages_builder/releases/download/pytorch3d-0.7.9/pytorch3d-0.7.9%2Bpt2.9.0cu128-cp311-cp311-linux_x86_64.whl" },
+    { url = "https://github.com/MiroPsota/torch_packages_builder/releases/download/pytorch3d-0.7.9/pytorch3d-0.7.9%2Bpt2.9.0cu128-cp311-cp311-win_amd64.whl" },
+]
+
+[[package]]
+name = "pywin32"
+version = "312"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/f5/10a6e845a00fc5e7afd0a988b744f403d4d57162a28d160a093c4d9322f0/pywin32-312-cp311-cp311-win32.whl", hash = "sha256:17948aeadbdb091f0ced6ef0841620794e68327b94ee415571c1203594b7215c", size = 6362659, upload-time = "2026-06-04T07:49:21.349Z" },
+    { url = "https://files.pythonhosted.org/packages/35/c4/dcd2d62b5944b6d5db53413a5899016ccd57ffcb7278f3f81655d25d2027/pywin32-312-cp311-cp311-win_amd64.whl", hash = "sha256:d11417d84412f859b722fad0841b3614459ed0047f7542d8362e77884f6b6e8a", size = 6928825, upload-time = "2026-06-04T07:49:23.934Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/56/3cbb433fe4501cdba2eb9040f56a4e1a8243faa4186b25295564d1a7a79d/pywin32-312-cp311-cp311-win_arm64.whl", hash = "sha256:b2200a054ca6d6625c4842fc56a4976a4b47f96b73dbe5538c3f813a80359f47", size = 6721875, upload-time = "2026-06-04T07:49:26.416Z" },
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -907,6 +952,7 @@ dependencies = [
     { name = "onnxruntime-gpu" },
     { name = "opencv-python" },
     { name = "pytorch-lightning" },
+    { name = "pytorch3d" },
     { name = "rtmlib" },
     { name = "smplx" },
     { name = "tensorrt-cu12" },
@@ -915,6 +961,7 @@ dependencies = [
     { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "trimesh" },
     { name = "tyro" },
     { name = "viser" },
     { name = "yacs" },
@@ -930,6 +977,7 @@ requires-dist = [
     { name = "onnxruntime-gpu", specifier = "==1.22.0" },
     { name = "opencv-python", specifier = ">=4.8.0" },
     { name = "pytorch-lightning", specifier = ">=2.0.0" },
+    { name = "pytorch3d", specifier = "==0.7.9+pt2.9.0cu128", index = "https://miropsota.github.io/torch_packages_builder" },
     { name = "rtmlib", specifier = ">=0.0.15" },
     { name = "smplx", specifier = "==0.1.28" },
     { name = "tensorrt-cu12", specifier = "==11.0.0.114" },
@@ -938,6 +986,7 @@ requires-dist = [
     { name = "timm", specifier = ">=0.9.0" },
     { name = "torch", specifier = "==2.9.0" },
     { name = "torchvision", specifier = "==0.24.1" },
+    { name = "trimesh", specifier = ">=4.0.0" },
     { name = "tyro", specifier = ">=0.9.17" },
     { name = "viser", specifier = ">=1.0.16" },
     { name = "yacs", specifier = ">=0.1.8" },

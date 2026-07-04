@@ -29,6 +29,9 @@ dependencies = [
     "chumpy",
     "viser>=1.0.16",
     "tyro>=0.9.17",
+    "trimesh>=4.0.0",
+    # Prebuilt wheel for torch 2.9 + cu128 (MiroPsota/torch_packages_builder).
+    "pytorch3d==0.7.9+pt2.9.0cu128",
 ]
 
 [tool.uv]
@@ -38,5 +41,11 @@ override-dependencies = [
     "onnxruntime-gpu==1.22.0",
 ]
 
+[[tool.uv.index]]
+name = "torch-packages"
+url = "https://miropsota.github.io/torch_packages_builder"
+explicit = true
+
 [tool.uv.sources]
 chumpy = { git = "https://github.com/mattloper/chumpy" }
+pytorch3d = { index = "torch-packages" }

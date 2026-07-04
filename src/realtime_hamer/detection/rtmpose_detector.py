@@ -130,34 +130,30 @@ def create_detector(
             score=mean_score,
         )
 
-    def detector(frame: np.ndarray) -> list[HandDet]:
-        all_kpts, all_scores = pose_model(frame)
-        # Best left and best right across people.
-        best: dict[bool, HandDet | None] = {False: None, True: None}
-        for kpts, scores in zip(all_kpts, all_scores):
-            for start in (_L_HAND, _R_HAND):
-                det = _from_slot(kpts, scores, start)
-                if det is None:
-                    continue
-                prev = best[det.is_right]
-                if prev is None or det.score > prev.score:
-                    best[det.is_right] = det
-
-        left, right = best[False], best[True]
+    def _filter_pair(left: HandDet | None, right: HandDet | None) -> list[HandDet]:
+        """Drop ghost opposite-hand slot (weaker and/or overlapping)."""
         if left is None and right is None:
             return []
         if left is None:
             return [right]
         if right is None:
             return [left]
-
-        # Both slots fired: drop ghost opposite-hand (weaker and/or overlapping).
         strong, weak = (right, left) if right.score >= left.score else (left, right)
         if weak.score < relative_score_thr * strong.score:
             return [strong]
         if _box_iou(left.box, right.box) >= max_iou:
             return [strong]
         return [left, right]
+
+    def detector(frame: np.ndarray) -> list[HandDet]:
+        all_kpts, all_scores = pose_model(frame)
+        # All people: keep every real hand (ghost L/R filtered per person).
+        hands: list[HandDet] = []
+        for kpts, scores in zip(all_kpts, all_scores):
+            left = _from_slot(kpts, scores, _L_HAND)
+            right = _from_slot(kpts, scores, _R_HAND)
+            hands.extend(_filter_pair(left, right))
+        return hands
 
     return detector
 

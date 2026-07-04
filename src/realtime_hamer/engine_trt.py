@@ -25,8 +25,11 @@ class TrtRunner:
                 f"Rebuild with trtexec (TensorRT {trt.__version__})."
             )
         self.context = self.engine.create_execution_context()
+        # Non-default stream avoids TRT's extra default-stream syncs.
+        self.stream = torch.cuda.Stream()
         self.input_names = []
         self.output_names = []
+        self._out_bufs: dict[str, torch.Tensor] = {}
         for i in range(self.engine.num_io_tensors):
             name = self.engine.get_tensor_name(i)
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
@@ -46,29 +49,36 @@ class TrtRunner:
         }[dt]
 
     def __call__(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        trt = self.trt
-        for name, tensor in inputs.items():
-            expected = self._dtype(self.engine.get_tensor_dtype(name))
-            if tensor.dtype != expected:
-                tensor = tensor.to(expected)
-            if not tensor.is_contiguous():
-                tensor = tensor.contiguous()
-            inputs[name] = tensor
-            self.context.set_input_shape(name, tuple(tensor.shape))
+        stream = self.stream
+        # Wait for host→device copies on the caller's stream.
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            for name, tensor in inputs.items():
+                expected = self._dtype(self.engine.get_tensor_dtype(name))
+                if tensor.dtype != expected:
+                    tensor = tensor.to(expected, non_blocking=True)
+                if not tensor.is_contiguous():
+                    tensor = tensor.contiguous()
+                inputs[name] = tensor
+                self.context.set_input_shape(name, tuple(tensor.shape))
 
-        outputs = {}
-        for name in self.output_names:
-            shape = tuple(self.context.get_tensor_shape(name))
-            dtype = self._dtype(self.engine.get_tensor_dtype(name))
-            outputs[name] = torch.empty(shape, device="cuda", dtype=dtype)
+            outputs = {}
+            for name in self.output_names:
+                shape = tuple(self.context.get_tensor_shape(name))
+                dtype = self._dtype(self.engine.get_tensor_dtype(name))
+                buf = self._out_bufs.get(name)
+                if buf is None or tuple(buf.shape) != shape or buf.dtype != dtype:
+                    buf = torch.empty(shape, device="cuda", dtype=dtype)
+                    self._out_bufs[name] = buf
+                outputs[name] = buf
 
-        for name, tensor in inputs.items():
-            self.context.set_tensor_address(name, int(tensor.data_ptr()))
-        for name, tensor in outputs.items():
-            self.context.set_tensor_address(name, int(tensor.data_ptr()))
+            for name, tensor in inputs.items():
+                self.context.set_tensor_address(name, int(tensor.data_ptr()))
+            for name, tensor in outputs.items():
+                self.context.set_tensor_address(name, int(tensor.data_ptr()))
 
-        stream = torch.cuda.current_stream().cuda_stream
-        assert self.context.execute_async_v3(stream)
+            assert self.context.execute_async_v3(stream.cuda_stream)
+        # Return views; caller must synchronize before host reads.
         return outputs
 
 

@@ -75,6 +75,46 @@ def _crop_patch(img, c_x, c_y, bb_width, bb_height, patch_width, patch_height, d
     )
 
 
+def prepare_hand_batch(
+    cfg: CfgNode,
+    img_cv2: np.ndarray,
+    box: np.ndarray,
+    is_right: bool,
+    device: torch.device,
+    rescale_factor: float = 2.0,
+) -> dict[str, torch.Tensor]:
+    """Fast single-hand crop → model batch (no DataLoader overhead)."""
+    img_size = cfg.MODEL.IMAGE_SIZE
+    mean = 255.0 * np.array(cfg.MODEL.IMAGE_MEAN)
+    std = 255.0 * np.array(cfg.MODEL.IMAGE_STD)
+    box = box.astype(np.float32)
+    center = (box[2:4] + box[0:2]) / 2.0
+    scale = rescale_factor * (box[2:4] - box[0:2]) / 200.0
+    bbox_shape = cfg.MODEL.get("BBOX_SHAPE", None)
+    bbox_size = float(expand_to_aspect_ratio(scale * 200, target_aspect_ratio=bbox_shape).max())
+
+    flip = not is_right
+    cvimg = img_cv2
+    downsampling_factor = (bbox_size / img_size) / 2.0
+    if downsampling_factor > 1.1:
+        k = max(3, int(downsampling_factor) | 1)
+        cvimg = cv2.GaussianBlur(cvimg, (k, k), (downsampling_factor - 1) / 2)
+
+    patch = _crop_patch(cvimg, center[0], center[1], bbox_size, bbox_size, img_size, img_size, flip)
+    patch = np.transpose(patch[:, :, ::-1], (2, 0, 1)).astype(np.float32)
+    for c in range(3):
+        patch[c] = (patch[c] - mean[c]) / std[c]
+
+    h, w = img_cv2.shape[:2]
+    return {
+        "img": torch.from_numpy(patch).unsqueeze(0).to(device, non_blocking=True),
+        "box_center": torch.tensor([[center[0], center[1]]], dtype=torch.float32, device=device),
+        "box_size": torch.tensor([bbox_size], dtype=torch.float32, device=device),
+        "img_size": torch.tensor([[float(w), float(h)]], dtype=torch.float32, device=device),
+        "right": torch.tensor([1.0 if is_right else 0.0], dtype=torch.float32, device=device),
+    }
+
+
 class ViTDetDataset(torch.utils.data.Dataset):
     def __init__(
         self,
