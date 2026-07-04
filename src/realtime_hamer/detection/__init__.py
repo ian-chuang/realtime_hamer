@@ -1,3 +1,3 @@
-from .rtmpose_detector import HandDet, create_detector, draw_hands, draw_mano_overlay
+from .rtmpose_detector import HandDet, create_detector, draw_hands
 
-__all__ = ["HandDet", "create_detector", "draw_hands", "draw_mano_overlay"]
+__all__ = ["HandDet", "create_detector", "draw_hands"]

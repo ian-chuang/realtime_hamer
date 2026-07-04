@@ -1,56 +1,50 @@
-"""Single-hand RTMPose (TRT) + HaMeR (TRT) estimator."""
+"""Multi-hand RTMPose (TRT) + HaMeR (TRT) estimator."""
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import torch
 
 from realtime_hamer.datasets.vitdet_dataset import ViTDetDataset
-from realtime_hamer.detection import HandDet, create_detector, draw_hands, draw_mano_overlay
+from realtime_hamer.detection import HandDet, create_detector, draw_hands
 from realtime_hamer.engine_trt import TrtRunner
 from realtime_hamer.models import load_hamer
 from realtime_hamer.scripts.export_hamer_trt import ensure_hamer_engine
 from realtime_hamer.utils import recursive_to
-from realtime_hamer.utils.geometry import cam_crop_to_full
-
-HandSide = Literal["left", "right"]
 
 
 @dataclass
-class HandEstimate:
-    """One frame of hand estimation."""
+class HandMesh:
+    """One reconstructed hand (fixed-root for 3D viz)."""
 
-    vertices: np.ndarray | None
-    """(778, 3) fixed-root mesh for 3D viser, or None if not requested / no hand."""
-
+    vertices: np.ndarray  # (778, 3)
     faces: np.ndarray
-    overlay_bgr: np.ndarray | None
-    """RTMPose overlay, or None if not requested."""
+    is_right: bool
+    score: float
 
-    mesh_overlay_bgr: np.ndarray | None
-    """MANO mesh on video, or None if not requested."""
 
-    detected: bool
-    det_ms: float
-    hamer_ms: float
-    """TRT + MANO only (no 2D drawing)."""
+@dataclass
+class FrameEstimate:
+    """All hands in one frame."""
 
-    pose_overlay_ms: float
-    mesh_overlay_ms: float
-    total_ms: float
+    hands: list[HandMesh] = field(default_factory=list)
+    overlay_bgr: np.ndarray | None = None
+    """RTMPose overlay, or None if ``draw_overlay=False``."""
+
+    det_ms: float = 0.0
+    hamer_ms: float = 0.0
+    total_ms: float = 0.0
 
 
 class HandPoseEstimator:
-    """Detect one hand and reconstruct with TensorRT HaMeR + MANO."""
+    """Detect and reconstruct every real hand in the frame."""
 
     def __init__(
         self,
-        hand: HandSide = "right",
         assets_dir: str | Path = "assets",
         checkpoint: str | Path | None = None,
         trt_cache: str | Path | None = None,
@@ -60,15 +54,10 @@ class HandPoseEstimator:
         smooth: float = 0.65,
         build_trt: bool = True,
     ):
-        if hand not in ("left", "right"):
-            raise ValueError("hand must be 'left' or 'right'")
-
         self.device = torch.device(device)
         if self.device.type != "cuda":
             raise RuntimeError("CUDA is required")
 
-        self.hand = hand
-        self.is_right = hand == "right"
         self.rescale_factor = rescale_factor
         self.scale = scale
         self.smooth = float(np.clip(smooth, 0.05, 1.0))
@@ -88,7 +77,6 @@ class HandPoseEstimator:
         self.model = self.model.to(self.device).eval()
         self.faces_right = np.asarray(self.model.mano.faces, dtype=np.uint32)
         self.faces_left = self.faces_right[:, [0, 2, 1]].copy()
-        self.faces = self.faces_right if self.is_right else self.faces_left
 
         if build_trt:
             engine_path = ensure_hamer_engine(assets_dir, cache_dir, fp16=True)
@@ -100,73 +88,51 @@ class HandPoseEstimator:
                     f"python -m realtime_hamer.scripts.export_hamer_trt --assets-dir {assets_dir}"
                 )
         self._trt = TrtRunner(str(engine_path))
-
         self._detector = create_detector(
-            hand=hand,
             device="cuda",
             mode="lightweight",
             trt_cache=cache_dir / "rtmpose",
         )
 
-        self._ema_box: np.ndarray | None = None
-        self._ema_hand_pose: torch.Tensor | None = None
-        self._ema_betas: torch.Tensor | None = None
-        self._ema_global: torch.Tensor | None = None
-        self._ema_cam: torch.Tensor | None = None
+        # Per-side EMA state (at most one left + one right after ghost filtering).
+        self._ema_state: dict[bool, dict] = {
+            False: {"box": None, "global": None, "pose": None, "betas": None},
+            True: {"box": None, "global": None, "pose": None, "betas": None},
+        }
 
-    def estimate(
-        self,
-        frame_bgr: np.ndarray,
-        *,
-        draw_pose: bool = True,
-        draw_mesh: bool = True,
-        want_3d: bool = True,
-    ) -> HandEstimate:
-        """Run detection + HaMeR. Skip unused viz work when flags are False."""
+    def estimate(self, frame_bgr: np.ndarray, *, draw_overlay: bool = True) -> FrameEstimate:
+        """Detect all hands and run HaMeR on each.
+
+        Args:
+            draw_overlay: If False, skip RTMPose drawing (saves time).
+        """
         t0 = time.perf_counter()
 
         t1 = time.perf_counter()
-        hands = self._detector(frame_bgr)
+        dets = self._detector(frame_bgr)
         det_ms = (time.perf_counter() - t1) * 1000.0
 
-        pose_overlay = None
-        pose_overlay_ms = 0.0
-        if draw_pose:
-            t_po = time.perf_counter()
-            pose_overlay = draw_hands(frame_bgr, hands)
-            pose_overlay_ms = (time.perf_counter() - t_po) * 1000.0
+        overlay = draw_hands(frame_bgr, dets) if draw_overlay else None
 
-        verts_root = None
-        mesh_overlay = None
-        mesh_overlay_ms = 0.0
+        hands: list[HandMesh] = []
         hamer_ms = 0.0
-
-        if hands:
+        seen = {False: False, True: False}
+        if dets:
             t2 = time.perf_counter()
-            verts_root, mesh_overlay, mesh_overlay_ms = self._reconstruct(
-                frame_bgr,
-                hands[0],
-                draw_mesh=draw_mesh,
-                want_3d=want_3d,
-            )
-            hamer_ms = (time.perf_counter() - t2) * 1000.0 - mesh_overlay_ms
-        else:
-            self._ema_box = None
-            self._ema_hand_pose = None
-            self._ema_betas = None
-            self._ema_global = None
-            self._ema_cam = None
+            for det in dets:
+                hands.append(self._reconstruct(frame_bgr, det))
+                seen[det.is_right] = True
+            hamer_ms = (time.perf_counter() - t2) * 1000.0
 
-        return HandEstimate(
-            vertices=verts_root,
-            faces=self.faces,
-            overlay_bgr=pose_overlay,
-            mesh_overlay_bgr=mesh_overlay,
-            detected=bool(hands),
+        for side in (False, True):
+            if not seen[side]:
+                self._ema_state[side] = {"box": None, "global": None, "pose": None, "betas": None}
+
+        return FrameEstimate(
+            hands=hands,
+            overlay_bgr=overlay,
             det_ms=det_ms,
-            hamer_ms=max(hamer_ms, 0.0),
-            pose_overlay_ms=pose_overlay_ms,
-            mesh_overlay_ms=mesh_overlay_ms,
+            hamer_ms=hamer_ms,
             total_ms=(time.perf_counter() - t0) * 1000.0,
         )
 
@@ -177,23 +143,17 @@ class HandPoseEstimator:
         return a * new + (1.0 - a) * prev
 
     @torch.inference_mode()
-    def _reconstruct(
-        self,
-        frame_bgr: np.ndarray,
-        hand: HandDet,
-        *,
-        draw_mesh: bool,
-        want_3d: bool,
-    ):
-        box = np.asarray(hand.box, dtype=np.float32)
-        self._ema_box = self._ema(self._ema_box, box)
-        box = self._ema_box
-
+    def _reconstruct(self, frame_bgr: np.ndarray, hand: HandDet) -> HandMesh:
         is_right = bool(hand.is_right)
-        boxes = box[None, :]
+        state = self._ema_state[is_right]
+
+        box = np.asarray(hand.box, dtype=np.float32)
+        state["box"] = self._ema(state["box"], box)
+        box = state["box"]
+
         right = np.asarray([1.0 if is_right else 0.0], dtype=np.float32)
         dataset = ViTDetDataset(
-            self.model_cfg, frame_bgr, boxes, right, rescale_factor=self.rescale_factor
+            self.model_cfg, frame_bgr, box[None, :], right, rescale_factor=self.rescale_factor
         )
         batch = recursive_to(
             next(iter(torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=0))),
@@ -204,16 +164,13 @@ class HandPoseEstimator:
         global_orient = outs["global_orient"].float()
         hand_pose = outs["hand_pose"].float()
         betas = outs["betas"].float()
-        pred_cam = outs["pred_cam"].float()
 
-        self._ema_global = self._ema(self._ema_global, global_orient)
-        self._ema_hand_pose = self._ema(self._ema_hand_pose, hand_pose)
-        self._ema_betas = self._ema(self._ema_betas, betas)
-        self._ema_cam = self._ema(self._ema_cam, pred_cam)
-        global_orient = self._ema_global
-        hand_pose = self._ema_hand_pose
-        betas = self._ema_betas
-        pred_cam = self._ema_cam
+        state["global"] = self._ema(state["global"], global_orient)
+        state["pose"] = self._ema(state["pose"], hand_pose)
+        state["betas"] = self._ema(state["betas"], betas)
+        global_orient = state["global"]
+        hand_pose = state["pose"]
+        betas = state["betas"]
 
         mano_out = self.model.mano(
             global_orient=global_orient,
@@ -223,47 +180,20 @@ class HandPoseEstimator:
         )
         torch.cuda.synchronize()
 
-        verts_mano = mano_out.vertices[0]
-        wrist_mano = mano_out.joints[0, 0]
+        # Fixed-root: wrist at origin, cancel global rotation.
+        R = global_orient[0, 0]
+        wrist = mano_out.joints[0, 0]
+        verts = (R.T @ (mano_out.vertices[0] - wrist).T).T.detach().cpu().numpy()
+        if not is_right:
+            verts[:, 0] *= -1.0
+        verts[:, 1] *= -1.0
+        if self.scale != 1.0:
+            verts = verts * self.scale
+
         faces = self.faces_right if is_right else self.faces_left
-        self.faces = faces
-
-        mesh_overlay = None
-        mesh_overlay_ms = 0.0
-        if draw_mesh:
-            t_m = time.perf_counter()
-            pred_cam_use = pred_cam.clone()
-            verts_full = verts_mano.clone()
-            if not is_right:
-                verts_full[:, 0] *= -1.0
-                pred_cam_use[:, 1] *= -1.0
-            focal = (
-                self.model_cfg.EXTRA.FOCAL_LENGTH
-                / self.model_cfg.MODEL.IMAGE_SIZE
-                * batch["img_size"].float().max()
-            )
-            cam_t = cam_crop_to_full(
-                pred_cam_use,
-                batch["box_center"].float(),
-                batch["box_size"].float(),
-                batch["img_size"].float(),
-                focal,
-            )
-            verts_cam = (verts_full + cam_t[0]).detach().cpu().numpy()
-            mesh_overlay = draw_mano_overlay(
-                frame_bgr, verts_cam, faces, float(focal.item()), color=(36, 120, 143)
-            )
-            mesh_overlay_ms = (time.perf_counter() - t_m) * 1000.0
-
-        verts_root = None
-        if want_3d:
-            R = global_orient[0, 0]
-            verts_root = (R.T @ (verts_mano - wrist_mano).T).T.detach().cpu().numpy()
-            if not is_right:
-                verts_root[:, 0] *= -1.0
-            verts_root[:, 1] *= -1.0
-            if self.scale != 1.0:
-                verts_root = verts_root * self.scale
-            verts_root = verts_root.astype(np.float32)
-
-        return verts_root, mesh_overlay, mesh_overlay_ms
+        return HandMesh(
+            vertices=verts.astype(np.float32),
+            faces=faces,
+            is_right=is_right,
+            score=float(hand.score),
+        )

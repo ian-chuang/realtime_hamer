@@ -1,22 +1,15 @@
-"""Wholebody RTMPose hand detector with TensorRT engines (trtexec).
-
-Uses balanced wholebody models (YOLOX-m + RTMW-x) — capable stand-in for
-HaMeR's ViTDet/ViTPose, accelerated the same way as HaMeR (ONNX → trtexec).
-"""
+"""Wholebody RTMPose hand detector (YOLOX CUDA + RTMW TensorRT)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import cv2
 import numpy as np
 from rtmlib import Wholebody
 
 from realtime_hamer.engine_trt import TrtOrtSession, build_engine_from_onnx
-
-HandSide = Literal["left", "right"]
 
 _NUM_HAND_KPTS = 21
 _L_HAND = 91
@@ -34,18 +27,29 @@ _HAND_EDGES = (
 @dataclass
 class HandDet:
     box: list[float]
-    is_right: bool  # true side from RTMPose slot (for HaMeR flip)
+    is_right: bool
     kpts: np.ndarray
     scores: np.ndarray
     score: float
 
 
-def _patch_sessions_trt(pose_model: Wholebody, cache_dir: Path) -> None:
-    """Replace ORT sessions with TRT engines when trtexec succeeds.
+def _box_iou(a: list[float], b: list[float]) -> float:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    iw, ih = max(0.0, ix1 - ix0), max(0.0, iy1 - iy0)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
 
-    Some detector ONNX graphs (YOLOX+NMS TopK) fail on TensorRT 11; those stay
-    on ORT CUDA. Pose (RTMW) usually builds cleanly.
-    """
+
+def _patch_sessions_trt(pose_model: Wholebody, cache_dir: Path) -> None:
+    """RTMW → TRT; YOLOX stays on ORT CUDA (NMS TopK breaks TRT 11)."""
     import onnxruntime as ort
 
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -53,8 +57,6 @@ def _patch_sessions_trt(pose_model: Wholebody, cache_dir: Path) -> None:
     if "CUDAExecutionProvider" not in ort.get_available_providers():
         cuda_providers = ["CPUExecutionProvider"]
 
-    # YOLOX ONNX embeds NMS with dynamic TopK — TRT 11 rejects / yields -1 dims.
-    # Keep person detector on ORT CUDA; accelerate the heavier RTMW pose with TRT.
     det = pose_model.det_model
     det.session = ort.InferenceSession(det.onnx_model, providers=cuda_providers)
     det.backend = "onnxruntime"
@@ -62,24 +64,17 @@ def _patch_sessions_trt(pose_model: Wholebody, cache_dir: Path) -> None:
 
     pose = pose_model.pose_model
     pose_engine = cache_dir / "rtmw.engine"
-    # Preserve ONNX I/O name order (simcc_x, simcc_y) — TRT enum order can differ.
-    ort_pose = ort.InferenceSession(pose.onnx_model, providers=cuda_providers)
-    in_names = [i.name for i in ort_pose.get_inputs()]
-    out_names = [o.name for o in ort_pose.get_outputs()]
     try:
         build_engine_from_onnx(Path(pose.onnx_model), pose_engine)
-        pose.session = TrtOrtSession(
-            pose_engine, input_names=in_names, output_names=out_names
-        )
-        print(f"RTMPose pose_model: TensorRT {pose_engine.name} outs={out_names}")
+        pose.session = TrtOrtSession(pose_engine)
+        print(f"RTMPose pose_model: TensorRT {pose_engine.name}")
     except Exception as exc:
         print(f"RTMPose pose_model: TRT failed ({exc}); using ORT CUDA")
-        pose.session = ort_pose
+        pose.session = ort.InferenceSession(pose.onnx_model, providers=cuda_providers)
     pose.backend = "onnxruntime"
 
 
 def create_detector(
-    hand: HandSide = "right",
     device: str = "cuda",
     mode: str = "lightweight",
     trt_cache: str | Path | None = None,
@@ -87,60 +82,82 @@ def create_detector(
     min_kpts: int = 10,
     min_mean_score: float = 0.55,
     min_box_size: float = 24.0,
+    relative_score_thr: float = 0.75,
+    max_iou: float = 0.35,
 ):
-    """Return ``detector(frame) -> list[HandDet]`` (0 or 1 hand).
+    """Return ``detector(frame) -> list[HandDet]`` for all real hands in the frame.
 
-    Only the specified hand slot is used (no opposite-hand fallback).
+    Wholebody always fills L/R slots; ghost opposite-hand slots are dropped when
+    they are much weaker or heavily overlap the stronger hand.
     """
-    if hand not in ("left", "right"):
-        raise ValueError("hand must be 'left' or 'right'")
-    is_right = hand == "right"
-    start = _R_HAND if is_right else _L_HAND
-
-    import torch  # noqa: F401  # load CUDA before TRT
+    import torch  # noqa: F401
 
     pose_model = Wholebody(mode=mode, backend="onnxruntime", device=device)
     if trt_cache is not None:
         _patch_sessions_trt(pose_model, Path(trt_cache))
 
+    def _from_slot(kpts, scores, start) -> HandDet | None:
+        is_right = start == _R_HAND
+        hk = kpts[start : start + _NUM_HAND_KPTS]
+        hs = scores[start : start + _NUM_HAND_KPTS]
+        if hs[0] < score_thr:
+            return None
+        valid = hs > score_thr
+        if int(valid.sum()) < min_kpts:
+            return None
+        mean_score = float(hs[valid].mean())
+        if mean_score < min_mean_score:
+            return None
+        pts = hk[valid]
+        x0, y0 = float(pts[:, 0].min()), float(pts[:, 1].min())
+        x1, y1 = float(pts[:, 0].max()), float(pts[:, 1].max())
+        w, h = x1 - x0, y1 - y0
+        if w <= 1 or h <= 1:
+            return None
+        if w > h:
+            d = (w - h) / 2
+            y0, y1 = y0 - d, y1 + d
+        else:
+            d = (h - w) / 2
+            x0, x1 = x0 - d, x1 + d
+        if min(x1 - x0, y1 - y0) < min_box_size:
+            return None
+        return HandDet(
+            box=[x0, y0, x1, y1],
+            is_right=is_right,
+            kpts=hk.astype(np.float32),
+            scores=hs.astype(np.float32),
+            score=mean_score,
+        )
+
     def detector(frame: np.ndarray) -> list[HandDet]:
         all_kpts, all_scores = pose_model(frame)
-        best: HandDet | None = None
+        # Best left and best right across people.
+        best: dict[bool, HandDet | None] = {False: None, True: None}
         for kpts, scores in zip(all_kpts, all_scores):
-            hk = kpts[start : start + _NUM_HAND_KPTS]
-            hs = scores[start : start + _NUM_HAND_KPTS]
-            if hs[0] < score_thr:
-                continue
-            valid = hs > score_thr
-            if int(valid.sum()) < min_kpts:
-                continue
-            mean_score = float(hs[valid].mean())
-            if mean_score < min_mean_score:
-                continue
-            pts = hk[valid]
-            x0, y0 = float(pts[:, 0].min()), float(pts[:, 1].min())
-            x1, y1 = float(pts[:, 0].max()), float(pts[:, 1].max())
-            w, h = x1 - x0, y1 - y0
-            if w <= 1 or h <= 1:
-                continue
-            if w > h:
-                d = (w - h) / 2
-                y0, y1 = y0 - d, y1 + d
-            else:
-                d = (h - w) / 2
-                x0, x1 = x0 - d, x1 + d
-            if min(x1 - x0, y1 - y0) < min_box_size:
-                continue
-            det = HandDet(
-                box=[x0, y0, x1, y1],
-                is_right=is_right,
-                kpts=hk.astype(np.float32),
-                scores=hs.astype(np.float32),
-                score=mean_score,
-            )
-            if best is None or det.score > best.score:
-                best = det
-        return [best] if best is not None else []
+            for start in (_L_HAND, _R_HAND):
+                det = _from_slot(kpts, scores, start)
+                if det is None:
+                    continue
+                prev = best[det.is_right]
+                if prev is None or det.score > prev.score:
+                    best[det.is_right] = det
+
+        left, right = best[False], best[True]
+        if left is None and right is None:
+            return []
+        if left is None:
+            return [right]
+        if right is None:
+            return [left]
+
+        # Both slots fired: drop ghost opposite-hand (weaker and/or overlapping).
+        strong, weak = (right, left) if right.score >= left.score else (left, right)
+        if weak.score < relative_score_thr * strong.score:
+            return [strong]
+        if _box_iou(left.box, right.box) >= max_iou:
+            return [strong]
+        return [left, right]
 
     return detector
 
@@ -160,36 +177,4 @@ def draw_hands(frame_bgr: np.ndarray, hands: list[HandDet]) -> np.ndarray:
         for pt, sc in zip(kpts, scores):
             if sc > 0.3:
                 cv2.circle(out, tuple(pt.astype(int)), 3, color, -1)
-    return out
-
-
-def draw_mano_overlay(
-    frame_bgr: np.ndarray,
-    verts_cam: np.ndarray,
-    faces: np.ndarray,
-    focal: float,
-    color=(36, 120, 143),
-) -> np.ndarray:
-    """Project MANO verts (OpenCV camera frame) and fill triangles on the image."""
-    out = frame_bgr.copy()
-    h, w = out.shape[:2]
-    cx, cy = w * 0.5, h * 0.5
-    z = np.clip(verts_cam[:, 2], 1e-4, None)
-    u = (focal * verts_cam[:, 0] / z + cx).astype(np.int32)
-    v = (focal * verts_cam[:, 1] / z + cy).astype(np.int32)
-    pts = np.stack([u, v], axis=1)
-
-    # Painter's algorithm: far faces first.
-    face_z = verts_cam[faces].mean(axis=1)[:, 2]
-    order = np.argsort(-face_z)
-    overlay = out.copy()
-    fill = (int(color[2]), int(color[1]), int(color[0]))  # RGB -> BGR-ish for fill
-    for fi in order[::8]:  # stride for speed
-        tri = pts[faces[fi]]
-        if np.any(tri[:, 0] < -w) or np.any(tri[:, 0] > 2 * w):
-            continue
-        if np.any(tri[:, 1] < -h) or np.any(tri[:, 1] > 2 * h):
-            continue
-        cv2.fillConvexPoly(overlay, tri, fill)
-    cv2.addWeighted(overlay, 0.55, out, 0.45, 0, out)
     return out
