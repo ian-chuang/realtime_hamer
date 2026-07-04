@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+
+import numpy as np
 import torch
 
 
@@ -21,6 +25,14 @@ class TrtRunner:
                 f"Rebuild with trtexec (TensorRT {trt.__version__})."
             )
         self.context = self.engine.create_execution_context()
+        self.input_names = []
+        self.output_names = []
+        for i in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(i)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self.input_names.append(name)
+            else:
+                self.output_names.append(name)
 
     def _dtype(self, dt):
         trt = self.trt
@@ -45,10 +57,7 @@ class TrtRunner:
             self.context.set_input_shape(name, tuple(tensor.shape))
 
         outputs = {}
-        for i in range(self.engine.num_io_tensors):
-            name = self.engine.get_tensor_name(i)
-            if self.engine.get_tensor_mode(name) != trt.TensorIOMode.OUTPUT:
-                continue
+        for name in self.output_names:
             shape = tuple(self.context.get_tensor_shape(name))
             dtype = self._dtype(self.engine.get_tensor_dtype(name))
             outputs[name] = torch.empty(shape, device="cuda", dtype=dtype)
@@ -61,3 +70,37 @@ class TrtRunner:
         stream = torch.cuda.current_stream().cuda_stream
         assert self.context.execute_async_v3(stream)
         return outputs
+
+
+class TrtOrtSession:
+    """onnxruntime.InferenceSession-compatible wrapper over a TRT engine."""
+
+    def __init__(self, engine_path: str | Path):
+        self.runner = TrtRunner(str(engine_path))
+
+    def get_inputs(self):
+        return [type("I", (), {"name": n})() for n in self.runner.input_names]
+
+    def get_outputs(self):
+        return [type("O", (), {"name": n})() for n in self.runner.output_names]
+
+    def run(self, output_names, input_feed):
+        torch_in = {}
+        for name, arr in input_feed.items():
+            t = torch.from_numpy(np.ascontiguousarray(arr)).cuda()
+            torch_in[name] = t
+        outs = self.runner(torch_in)
+        torch.cuda.synchronize()
+        names = output_names if output_names else self.runner.output_names
+        return [outs[n].float().cpu().numpy() for n in names]
+
+
+def build_engine_from_onnx(onnx_path: Path, engine_path: Path) -> Path:
+    """Build a TRT engine with system trtexec (TensorRT 11)."""
+    if engine_path.is_file():
+        return engine_path
+    engine_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["trtexec", f"--onnx={onnx_path}", f"--saveEngine={engine_path}"]
+    print("Running:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+    return engine_path

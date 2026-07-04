@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -27,7 +26,7 @@ class Args:
     """Webcam index when --video is not set."""
 
     hand: HandSide = "right"
-    """Which hand to track."""
+    """Preferred hand side."""
 
     assets_dir: Path = Path("assets")
     """Directory with hamer_ckpts/ and data/mano/."""
@@ -61,7 +60,8 @@ def main(args: Args) -> None:
     server = viser.ViserServer(port=args.port)
     server.scene.add_frame("/world", axes_length=0.05, axes_radius=0.002)
     gui_fps = server.gui.add_text("FPS", initial_value="—", disabled=True)
-    gui_img = server.gui.add_image(np.zeros((64, 64, 3), dtype=np.uint8), label="RTMPose")
+    gui_pose = server.gui.add_image(np.zeros((64, 64, 3), dtype=np.uint8), label="RTMPose")
+    gui_mesh = server.gui.add_image(np.zeros((64, 64, 3), dtype=np.uint8), label="HaMeR mesh")
     mesh_handle = None
 
     print(f"Viser http://localhost:{args.port}  hand={args.hand}  (Ctrl+C to stop)")
@@ -73,7 +73,8 @@ def main(args: Args) -> None:
                 break
 
             est = estimator.estimate(frame)
-            gui_img.image = cv2.cvtColor(est.overlay_bgr, cv2.COLOR_BGR2RGB)
+            gui_pose.image = cv2.cvtColor(est.overlay_bgr, cv2.COLOR_BGR2RGB)
+            gui_mesh.image = cv2.cvtColor(est.mesh_overlay_bgr, cv2.COLOR_BGR2RGB)
             fps = 1000.0 / max(est.total_ms, 1e-3)
             gui_fps.value = (
                 f"{fps:.1f} fps   det {est.det_ms:.1f} ms   hamer {est.hamer_ms:.1f} ms   "
