@@ -62,13 +62,19 @@ def _patch_sessions_trt(pose_model: Wholebody, cache_dir: Path) -> None:
 
     pose = pose_model.pose_model
     pose_engine = cache_dir / "rtmw.engine"
+    # Preserve ONNX I/O name order (simcc_x, simcc_y) — TRT enum order can differ.
+    ort_pose = ort.InferenceSession(pose.onnx_model, providers=cuda_providers)
+    in_names = [i.name for i in ort_pose.get_inputs()]
+    out_names = [o.name for o in ort_pose.get_outputs()]
     try:
         build_engine_from_onnx(Path(pose.onnx_model), pose_engine)
-        pose.session = TrtOrtSession(pose_engine)
-        print(f"RTMPose pose_model: TensorRT {pose_engine.name}")
+        pose.session = TrtOrtSession(
+            pose_engine, input_names=in_names, output_names=out_names
+        )
+        print(f"RTMPose pose_model: TensorRT {pose_engine.name} outs={out_names}")
     except Exception as exc:
         print(f"RTMPose pose_model: TRT failed ({exc}); using ORT CUDA")
-        pose.session = ort.InferenceSession(pose.onnx_model, providers=cuda_providers)
+        pose.session = ort_pose
     pose.backend = "onnxruntime"
 
 

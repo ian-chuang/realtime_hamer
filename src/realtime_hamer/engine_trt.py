@@ -73,25 +73,44 @@ class TrtRunner:
 
 
 class TrtOrtSession:
-    """onnxruntime.InferenceSession-compatible wrapper over a TRT engine."""
+    """onnxruntime.InferenceSession-compatible wrapper over a TRT engine.
 
-    def __init__(self, engine_path: str | Path):
+    ``input_names`` / ``output_names`` must match the original ONNX/ORT order
+    (e.g. RTMPose expects simcc_x then simcc_y). TRT engine enumeration order
+    can differ and will silently break postprocessing if not preserved.
+    """
+
+    def __init__(
+        self,
+        engine_path: str | Path,
+        input_names: list[str] | None = None,
+        output_names: list[str] | None = None,
+    ):
         self.runner = TrtRunner(str(engine_path))
+        self._input_names = list(input_names or self.runner.input_names)
+        self._output_names = list(output_names or self.runner.output_names)
+        # Map ORT feed keys -> engine binding names if they differ.
+        self._input_alias = {}
+        for ort_name, eng_name in zip(self._input_names, self.runner.input_names):
+            self._input_alias[ort_name] = eng_name
+            self._input_alias[eng_name] = eng_name
 
     def get_inputs(self):
-        return [type("I", (), {"name": n})() for n in self.runner.input_names]
+        return [type("I", (), {"name": n})() for n in self._input_names]
 
     def get_outputs(self):
-        return [type("O", (), {"name": n})() for n in self.runner.output_names]
+        return [type("O", (), {"name": n})() for n in self._output_names]
 
     def run(self, output_names, input_feed):
         torch_in = {}
         for name, arr in input_feed.items():
-            t = torch.from_numpy(np.ascontiguousarray(arr)).cuda()
-            torch_in[name] = t
+            eng_name = self._input_alias.get(name, name)
+            if eng_name not in self.runner.input_names:
+                eng_name = self.runner.input_names[0]
+            torch_in[eng_name] = torch.from_numpy(np.ascontiguousarray(arr)).cuda()
         outs = self.runner(torch_in)
         torch.cuda.synchronize()
-        names = output_names if output_names else self.runner.output_names
+        names = output_names if output_names else self._output_names
         return [outs[n].float().cpu().numpy() for n in names]
 
 
